@@ -9,6 +9,7 @@ To install Pytorch:
 `pip install torch==1.9.0+cu112 torchvision==0.10.0+cu112 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html`
 
 Prepare for compiling Pytorch:
+
 `conda install astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses`
 
 Compile Pytorch:
