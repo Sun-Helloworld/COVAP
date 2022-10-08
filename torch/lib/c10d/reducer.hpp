@@ -73,10 +73,8 @@ class Reducer {
   // all live on the same device and have the same dimensionality.
   void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
-  // rank 0 node will broadcast the bucket indexes that will be dropped in 
-  // this step at the beginning of each steps
-  void broadcast_dropid();
-
+  // bucket selection strategy, each worker selects the same bucket in each 
+  // iteration, do not need to communicate
   void everyother();
 
   // This function is called when the forward function has produced an output,
@@ -198,21 +196,18 @@ class Reducer {
   std::vector<at::Tensor> local_used_maps_;
   std::vector<at::Tensor> local_used_maps_dev_;
   
-  float droprate;//global rate of drop buckets
-  std::vector<std::vector<at::Tensor>> lost_buckets;//stores all gradients been dropped
-  bool keymeng;//represents whether the algorithm is already begin
-  float local_threshold;//the local threshold in last iteration.
-  float global_threshold;//the global threshold in last iteration.
-  size_t threshold_step;
-  size_t decay_step;
-  float ef_init;
-  std::vector<double> bucket_dropchance;//dropchance of each bucket
+  int droprate;// e.g., droprate = 4 means three-quarter of buckets will be discarded
+  std::vector<std::vector<at::Tensor>> lost_buckets;// stores all gradients been dropped, for error feedback
+  bool keymeng;// represents whether the algorithm is already begin
+  float local_threshold;// the local threshold in last iteration. not used in OGC
+  float global_threshold;// the global threshold in last iteration. not used in OGC
+  size_t threshold_step;// not used in OGC
+  size_t decay_step;// decay step of EF scheduler coefficient
+  float ef_init;// initial value of EF scheduler coefficient
   std::vector<int> bucket_drop_id;//drop which buckets in every step
   std::vector<bool> lost_buckets_bool;//whether the bucket has been dropped
-  std::vector<at::Tensor> local_gradients;//the times of the bucket has been dropped continuously
-  std::vector<float> bucket_init_result;//the first 5 steps gradient results of each bucket
-  std::vector<float> last_bucket_result;//the bucket result of last step
-  std::vector<int> cut_strategy;//how to cut buckets
+  std::vector<at::Tensor> local_gradients;//not used in OGC
+  std::vector<int> cut_strategy;//how to cut buckets in bucket sharding
   std::vector<std::vector<int>> partid_of_drop_bucket;//which part to drop
 
   // Indicate that reduction is done and D2H copy is done as well.
@@ -222,7 +217,7 @@ class Reducer {
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   // if the bucket includes this variable will be dropped in this step, 
-  // store all the gradients it have
+  // store all the gradients it have for error feedback
   void store_drop_variable(VariableIndex index);
   
   void mark_variable_ready_dense(VariableIndex index);

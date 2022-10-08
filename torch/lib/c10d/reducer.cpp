@@ -220,11 +220,6 @@ Reducer::~Reducer() noexcept(false) {
   // to make DDP failure recoverable. Otherwise, multiple Reducer instances
   // (from recoveries) will add their hooks to the original model, and those
   // hooks will try to invoke methods on a deleted Reducer objects.
-  if(process_group_->getRank()==0){
-    for(int i = 0;i < buckets_.size();i++){
-      TORCH_WARN(bucket_dropchance[i]);
-    }
-  }
   
   for (auto& hook : hooks_) {
     auto& key = hook.first;
@@ -620,24 +615,6 @@ void Reducer::autograd_hook(VariableIndex index) {
   std::vector<int>::iterator it;
 	it = find(bucket_drop_id.begin(), bucket_drop_id.end(), bucket_index.bucket_index);
 	if (it != bucket_drop_id.end()){
-    // if (should_rebuild_buckets()) {
-    //   push_rebuilt_params(index);
-    // }else if(partid_of_drop_bucket[bucket_index.bucket_index].size() != cut_strategy[bucket_index.bucket_index]-1){
-    //   //error feedback
-    //   store_drop_variable(index);
-    //   return;
-    // }
-    // else{
-    //   if(lost_buckets[bucket_index.bucket_index].empty()){
-    //     std::vector<at::Tensor> tensors;
-    //     auto& bucket = buckets_[bucket_index.bucket_index];
-    //     tensors.reserve(bucket.replicas.size());
-    //     for (const auto& rep : bucket.replicas) {
-    //       tensors.push_back(rep.contents);
-    //     }
-    //     lost_buckets[bucket_index.bucket_index]=tensors;
-    //   }
-    // }
     if (should_rebuild_buckets()) {
       push_rebuilt_params(index);
     }else{
@@ -937,8 +914,6 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   if (comm_hook_ == nullptr) {
     bucket.work = process_group_->allreduce(tensors);
   } else {
-    //TORCH_WARN(buckets_.size()-bucket_drop_id.size());
-    //TORCH_WARN(next_bucket_);
 
      std::vector<int>::iterator it;
 	  it = find(bucket_drop_id.begin(), bucket_drop_id.end(), next_bucket_);
@@ -947,44 +922,24 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       at::TensorOptions options;
       options = options.dtype(at::kLong);
       options = options.device(tensors[0].device());
-      //auto temp_t = tensors[0].clone();
       for (int m = 0; m < bucket.replicas.size();m++) {
         lost_buckets[next_bucket_][m]*=ef_init+0.1*(num_iterations_>(decay_step*(1-ef_init)/0.1)?((1-ef_init)/0.1):(num_iterations_/decay_step));
       }
       for (int i = 0;i < partid_of_drop_bucket[next_bucket_].size();i++){
-        //int start = partid_of_drop_bucket[next_bucket_][i]*tensors[0].numel()/cut_strategy[next_bucket_];
-        //int end = (partid_of_drop_bucket[next_bucket_][i]+1)*tensors[0].numel()/cut_strategy[next_bucket_];
-        
-        //TORCH_WARN_ONCE("aaa");
         for (int m = 0; m < bucket.replicas.size();m++) {
           lost_buckets[next_bucket_][m].scatter(0,at::arange(partid_of_drop_bucket[next_bucket_][i],tensors[0].numel(),cut_strategy[next_bucket_],options),tensors[0].slice(0,partid_of_drop_bucket[next_bucket_][i],tensors[0].numel(),cut_strategy[next_bucket_]).contiguous());
         }
-        //TORCH_WARN_ONCE("bbb");
       }
       for(int j = 0;j < cut_strategy[next_bucket_];j++){
         std::vector<int>::iterator it2;
         it2 = find(partid_of_drop_bucket[next_bucket_].begin(), partid_of_drop_bucket[next_bucket_].end(), j);
         if(it2 == partid_of_drop_bucket[next_bucket_].end()){
-          //int start = j*tensors[0].numel()/cut_strategy[next_bucket_];
-          //int end = (j+1)*tensors[0].numel()/cut_strategy[next_bucket_];
-          // if(j == 0)
-          //   for (int m = 0; m < bucket.replicas.size();m++) {
-          //     lost_buckets[next_bucket_][m]*=0.5+0.1*(num_iterations_>1000?5:(num_iterations_/200));
-          //   }
-          
           tensors[0].scatter_add(0,at::arange(j,tensors[0].numel(),cut_strategy[next_bucket_],options),lost_buckets[next_bucket_][0].slice(0,j,lost_buckets[next_bucket_][0].numel(),cut_strategy[next_bucket_]).contiguous());
           tensors[0] = tensors[0].slice(0,j,tensors[0].numel(),cut_strategy[next_bucket_]).contiguous();          
-          // for (int m = 0; m < bucket.replicas.size();m++) {
-          //   lost_buckets[next_bucket_][m].scatter(0,at::arange(j,lost_buckets[next_bucket_][m].numel(),cut_strategy[next_bucket_],options),0);
-          // }
           TORCH_WARN_ONCE(tensors[0].numel());
           break;
         }
       }
-      // for (int m = 0; m < bucket.replicas.size();m++) {
-      //   TORCH_WARN_ONCE("aaa");
-      //   lost_buckets[next_bucket_][m]*=0.5+0.1*(num_iterations_>(decay_step*5)?5:(num_iterations_/decay_step));
-      // }
       
     }
     GradBucket grad_bucket(
@@ -1368,87 +1323,24 @@ void Reducer::search_unused_parameters(
   }
 }
 
-bool probability(double x){
-  //std::srand((unsigned)time(0));
-  if((double)rand()/RAND_MAX < x){
-    return true;
-  }
-  return false;
-}
-
-void Reducer::broadcast_dropid(){
-  bucket_drop_id.clear();
-  if(process_group_->getRank()==0){
-    std::srand((int)time(0));
-    for(int i = 0;i < buckets_.size();i++){
-      if(probability(bucket_dropchance[i])){
-        bucket_drop_id.push_back(i);
-      }
-    }
-  }
-  at::TensorOptions options;
-  options = options.dtype(at::kInt);
-  options = options.device(replicas_[0][0].device());
-  
-  //broadcast the length of random selected indexes
-  auto dropid_size = at::empty({1}, at::kInt);
-  auto dropid_size_accessor = dropid_size.accessor<int, 1>();
-  dropid_size_accessor[0] = bucket_drop_id.size();
-  auto dropid_size_tensor_device = at::empty({1}, options);
-  dropid_size_tensor_device.copy_(dropid_size,true);
-  
-  std::vector<at::Tensor> dropid_size_tensor_list = {dropid_size_tensor_device};
-  process_group_->broadcast(dropid_size_tensor_list)->wait();
-  dropid_size.copy_(dropid_size_tensor_list.front(), false);
-  
-  //broadcast random selected indexes
-  auto dropid = at::empty({(int64_t)dropid_size_accessor[0]}, at::kInt);
-  auto dropid_accessor = dropid.accessor<int, 1>();
-  if(process_group_->getRank()==0){
-    for (size_t i = 0; i < dropid_size_accessor[0]; i++) {
-      dropid_accessor[i] = bucket_drop_id[i];
-    }
-  }
-  auto dropid_tensor_device = at::empty({(int64_t)dropid_size_accessor[0]}, options);
-  dropid_tensor_device.copy_(dropid, true);
-  std::vector<at::Tensor> dropid_tensor_list = {dropid_tensor_device};
-  process_group_->broadcast(dropid_tensor_list)->wait();
-  dropid.copy_(dropid_tensor_list.front(), false);
-  if(process_group_->getRank()!=0){
-    for (size_t i = 0; i < dropid_size_accessor[0]; i++) {
-      bucket_drop_id.push_back(dropid_accessor[i]);
-    }
-  }
-  //TORCH_WARN(bucket_drop_id);
-}
-
 void Reducer::everyother(){
   bucket_drop_id.clear();
   for(int i = 0; i < buckets_.size();i++)
     partid_of_drop_bucket[i].clear();
-  //TORCH_WARN('a');
   for(int i = 0;i < accumulate(cut_strategy.begin(),cut_strategy.end(),0);i++){
     if(((i+num_iterations_) % (int)(droprate)) == 0)
       continue;
     int temp_i = i;
     for(int j = 0;j < buckets_.size();j++){
-      //TORCH_WARN('b');
-      //partid_of_drop_bucket[j].clear();
       if(temp_i - cut_strategy[j] < 0){
         if(bucket_drop_id.empty() || bucket_drop_id.back() != j)
           bucket_drop_id.push_back(j);
-        //TORCH_WARN('c');
         partid_of_drop_bucket[j].push_back(temp_i);
         break;
       }
       temp_i -= cut_strategy[j];
     }
-    //i += (int)(1/droprate);
   }
-  //TORCH_WARN(bucket_drop_id);
-  //for(int i =0; i < buckets_.size();i++)
-  //TORCH_WARN(partid_of_drop_bucket);
-  //TORCH_WARN(partid_of_drop_bucket[buckets_.size()-1].size());
 }
 
 void Reducer::prepare_for_backward(
@@ -1466,8 +1358,6 @@ void Reducer::prepare_for_backward(
   reset_bucket_counting();
 
   if(!should_rebuild_buckets()){
-    //if(num_iterations_ >= 3)
-    //broadcast_dropid();
     everyother();
     int init_id = 0;
     for (auto id : bucket_drop_id) {
@@ -1666,17 +1556,8 @@ void Reducer::finalize_backward() {
   divFactor_ = kUnsetDivFactor;
 
   int count_buck = 0;
-  
-  // float *bucket_result = new float[buckets_.size()]();
-  // std::vector<float> grad_result;
 
   bool threshold_key = false;
-
-  // // if(num_iterations_ % threshold_step == 0){
-  // //   threshold_key = true;
-  // // }
-
-  // at::Tensor local_gradient = local_gradients[0];
 
 // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
@@ -1693,9 +1574,6 @@ void Reducer::finalize_backward() {
           "Expected bucket.future_work not to be null. "
           "This may indicate that communication hook was not properly installed.");
 
-      // if(count_buck>=1 && threshold_key){
-      //   local_gradient = at::_cat({local_gradient,local_gradients[count_buck]},0);
-      // }
       
       std::vector<int>::iterator it;
 	    it = find(bucket_drop_id.begin(), bucket_drop_id.end(), count_buck);
@@ -1704,7 +1582,6 @@ void Reducer::finalize_backward() {
         tensors.reserve(bucket.replicas.size());
         for (const auto& replica : bucket.replicas) {
           tensors.push_back(replica.contents*0);
-          //TORCH_WARN("a:",at::_shape_as_tensor(replica.contents));
         }
         auto future_result = tensors;
         for (size_t i = 0; i < future_result.size(); i++) {
@@ -1735,20 +1612,10 @@ void Reducer::finalize_backward() {
           options = options.dtype(replica.contents.dtype());
           options = options.device(replica.contents.device());
           auto temp = at::zeros_like(replica.contents,options);
-          //int start = j*replica.contents.numel()/cut_strategy[count_buck];
-          //int end = (j+1)*replica.contents.numel()/cut_strategy[count_buck];
           at::TensorOptions options2;
           options2 = options2.dtype(at::kLong);
           options2 = options2.device(temp.device());
-          //TORCH_WARN_ONCE("ccc");
           temp.scatter_add(0,at::arange(j,replica.contents.numel(),cut_strategy[count_buck],options2),future_result[i]);
-          //TORCH_WARN_ONCE("ddd");
-          // if(j>0){
-          //   future_result[i] = at::cat([at::zeros({static_cast<long>(j*replica.contents.numel()/cut_strategy[count_buck])}, options),future_result[i]]);
-          // }
-          // if(j<cut_strategy[count_buck]-1){
-          //   future_result[i] = at::cat([future_result[i],at::zeros({static_cast<long>((cut_strategy[count_buck]-1-j)*replica.contents.numel()/cut_strategy[count_buck])}, options)]);
-          // }
           
           if (bucket.expect_sparse_gradient) {
             replica.contents.copy_(temp);
@@ -1764,13 +1631,8 @@ void Reducer::finalize_backward() {
         bucket.future_work->wait();
         auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());
-        
-        //
-        //TORCH_WARN(future_result.size());//bucket_number
         for (size_t i = 0; i < future_result.size(); i++) {
           auto& replica = bucket.replicas[i];
-          //TORCH_WARN(i,":",at::_shape_as_tensor(replica.contents));
-          //TORCH_WARN_ONCE(typeid(replica.contents).name());//N2at6TensorE
           if (bucket.expect_sparse_gradient) {
             replica.contents.copy_(future_result[i]);
           } else {
@@ -1778,25 +1640,6 @@ void Reducer::finalize_backward() {
           // following the same logic in `initialize_buckets`.
             populate_bucket_views_out(replica, future_result[i]);
           }
-          //TORCH_WARN(at::abs(replica.contents).sum()/(at::numel(replica.contents)-(replica.contents==0).sum()));
-          // if(process_group_->getRank()==0 && keymeng){
-          //   auto temp1 = at::abs(replica.contents).sum()/(at::numel(replica.contents)-(replica.contents==0).sum());
-          //   //auto temp1 = at::norm(replica.contents,2)/(at::numel(replica.contents)-(replica.contents==0).sum()));
-            
-          //   float result = temp1.item<float>();
-          //   // if(num_iterations_ < 5){
-          //   //   bucket_init_result[count_buck]+= result;
-          //   // }
-          //   // else{
-          //   //   bucket_result[count_buck] = result/bucket_init_result[count_buck];
-          //   //   grad_result.push_back(result/bucket_init_result[count_buck]);  
-          //   // }
-          //   // bucket_result[count_buck] = result/last_bucket_result[count_buck];
-          //   // grad_result.push_back(result/last_bucket_result[count_buck]);  
-          //   // last_bucket_result[count_buck] = result;
-          //   bucket_result[count_buck] = result;
-          //   grad_result.push_back(result);  
-          // }
         }
       }
     }
@@ -1808,53 +1651,7 @@ void Reducer::finalize_backward() {
     }
     count_buck++;
   }
-
-  // if(threshold_key){
-  //   // at::Tensor global_gradients = buckets_[0].replicas[0].contents;
-  //   // for(int i = 1;i < buckets_.size();i++){
-  //   //   global_gradients = at::_cat({global_gradients,buckets_[i].replicas[0].contents},0);
-  //   // }
-  //   // auto sorted_global = at::sort(at::abs(global_gradients),-1,true);
-  //   auto sorted_local = at::sort(at::abs(local_gradient),-1,true);
-  //   int k = 0.01 * at::_shape_as_tensor(local_gradient).item<int>();
-  //   //global_threshold = std::get<0>(sorted_global)[k].item<float>();
-  //   local_threshold = std::get<0>(sorted_local)[k].item<float>();
-  //   if(local_threshold<0.01)
-  //     threshold_step = 10;
-  //   if(local_threshold<0.002)
-  //     threshold_step = 50;
-  // }
-
-  // local_gradients.clear();
-
-  // if(process_group_->getRank()==0 && keymeng){
-  //   sort(grad_result.begin(), grad_result.end());
-  //   float min = grad_result.front();
-  //   float max = grad_result.back();
-  //   float center;
-  //   if(grad_result.size()%2==0){
-  //     center = (grad_result[grad_result.size()/2-1]+grad_result[grad_result.size()/2])/2;
-  //   }else{
-  //     center = grad_result[grad_result.size()/2];
-  //   }
-  //   for(size_t i = 0;i < buckets_.size();i++){
-  //     if(bucket_result[i]!=0){
-  //       if(bucket_result[i]-center > 0){
-  //         if(bucket_dropchance[i]>0.01){
-  //           float k = (bucket_result[i]-center)/(max-center);
-  //           bucket_dropchance[i] *= 1 - 0.005*k;
-  //         }
-  //       }else{
-  //         if(bucket_dropchance[i]<0.8){
-  //           float k = (center-bucket_result[i])/(center-min);
-  //           bucket_dropchance[i] *= 1 + 0.005*(k>199?199:k);
-  //         } 
-  //       }
-  //     }
-  //   }
-  // }
   
-
 
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
@@ -2033,13 +1830,10 @@ bool Reducer::rebuild_buckets() {
   std::vector<int> variable_size;
   std::vector<int> grad_size;
 
-  //int sum = 0;
-
   for(int i = 0;i < buckets_.size();i++) {//start from the second bucket
     for(auto& replica : buckets_[i].replicas){
       variable_size.push_back(at::numel(replica.contents));
       grad_size.push_back(at::numel(replica.contents));
-      //sum += at::numel(replica.contents);
     }
   }
   sort(variable_size.begin(), variable_size.end());
@@ -2051,9 +1845,6 @@ bool Reducer::rebuild_buckets() {
   }else{
     center = variable_size[variable_size.size()/2];
   }
-  //float avg = sum/(buckets_.size()-1);
-  //TORCH_WARN(avg);
-  //cut_strategy.push_back(1);//first bucket
   for(int i = 0;i < grad_size.size();i++){
     int t = int((float(grad_size[i])/center - 0.3));
     if(t > 0){
@@ -2064,17 +1855,8 @@ bool Reducer::rebuild_buckets() {
     }
     else
       cut_strategy.push_back(1);
-    // TORCH_WARN(variable_size[i]);
-    // TORCH_WARN(int((float(variable_size[i])/avg)+0.5));
   }
 
-  if(process_group_->getRank()==0){
-    for(int i = 0;i < buckets_.size();i++){
-      bucket_dropchance.push_back(1);
-      // bucket_init_result.push_back(0);
-      // last_bucket_result.push_back(0.001);
-    }
-  }
   lost_buckets.reserve(buckets_.size());
   lost_buckets_bool.reserve(buckets_.size());
   local_gradients.reserve(buckets_.size());
