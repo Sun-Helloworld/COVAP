@@ -23,6 +23,7 @@ Compile Pytorch:
 `python setup.py install`
 
 ## Use OGC
-You need to replace several files in pytorch and recompile it to apply OGC. We provide these files and usage methods in the "torch" directory. See README.md in "torch".
+You need to replace several files in pytorch and recompile it to apply OGC. We provide these files and usage methods in "/torch" directory. See README.md in "/torch".
 
 ## Run benchmarks
+see "/benchmarks" folder.
