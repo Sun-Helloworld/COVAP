@@ -1,4 +1,4 @@
-source /root/anaconda3/bin/activate  /root/anaconda3/envs/pytorch_5
+source /root/anaconda3/bin/activate  /root/anaconda3/envs/Your_name
 
 scp root@$MasterIPAddress:$SourceCodePath/pytorch/torch/lib/c10d/reducer.cpp $SourceCodePath/pytorch/torch/lib/c10d/
 scp root@$MasterIPAddress:$SourceCodePath/pytorch/torch/lib/c10d/reducer.hpp $SourceCodePath/pytorch/torch/lib/c10d/
