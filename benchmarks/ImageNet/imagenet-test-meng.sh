@@ -18,12 +18,10 @@ source /root/anaconda3/bin/activate  /root/anaconda3/envs/Your_name
 declare master_pids
 declare rank=$NODE_RANK
 
-#echo "(" cd /home/torchvision_examples && NCCL_SOCKET_IFNAME="eth0" GLOO_SOCKET_IFNAME="eth0" python main.py -a resnet101 --dist-url 'tcp://10.10.108.4:12345' --dist-backend 'nccl' --multiprocessing-distributed --world-size 8 --rank ${rank} /mnt/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC ")"
-#( cd /home/pytorch_simple_classification_baselines && NCCL_SOCKET_IFNAME="eth0" GLOO_SOCKET_IFNAME="eth0" python ddp-test-meng.py ${rank} 8 "10.10.108.4:23579" 0 ) &
 ( cd $CodePath && NCCL_SOCKET_IFNAME="eth0" GLOO_SOCKET_IFNAME="eth0" python main.py -a resnet101 --dist-url 'tcp://$MasterIPAddress:23579' --dist-backend 'nccl' --multiprocessing-distributed --world-size 8 --rank ${rank} /mnt/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC ) &
 master_pids=$!
 
-# 开始接收SIGINT信号 Ctrl+C触发
+# Ctrl+C
 handleSigInt() {
   echo "killing all python processes"
   ps aux|grep -E "main.py"|grep -v grep|awk '{print $2}'|xargs kill -9
