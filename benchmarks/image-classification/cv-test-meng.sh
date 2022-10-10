@@ -24,7 +24,7 @@ master_pids=$!
 
 # Ctrl+C
 handleSigInt() {
-  echo "正在杀死所有进程"
+  echo "killing all python processes"
   ps aux|grep -E "ddp-test-meng.py"|grep -v grep|awk '{print $2}'|xargs kill -9
   exit 0 
 }
