@@ -1,4 +1,4 @@
-# OGC: Overlapping-Aware Gradient Compression for Near-Linear Scaling Data Parallel Training
+# Near-Linear Scaling Data Parallel Training with Overlapping-Aware Gradient Compression
 ## Setup the environment
 To install Pytorch: 
 
